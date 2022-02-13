@@ -3,6 +3,6 @@
 
 #include <stdint.h>
 
-static const uint8_t PIN_LEDS = 5;
+static const uint8_t PIN_LEDS = 3;
 
 #endif

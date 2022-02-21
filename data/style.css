@@ -1,4 +1,28 @@
-h1
+body
 {
-  color: aqua;
+  background-color: #111;
+  color: #fff;
+}
+
+div.control-grid
+{
+  display: flex;
+  flex-wrap: wrap;
+}
+
+input[type=button]
+{
+  margin: 0.5cm;
+  width: calc(100% / 5 - 1cm);
+  height: 2cm;
+}
+
+.picker
+{
+  display: none;
+}
+
+.show
+{
+  display: block;
 }

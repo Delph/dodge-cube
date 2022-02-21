@@ -8,6 +8,7 @@
 #include "config.h"
 #include "mapping.h"
 #include "pins.h"
+#include "webserver.h"
 
 const char* SSID = "";
 const char* PASSWORD = "";
@@ -21,109 +22,64 @@ Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUM_LEDS, PIN_LEDS, NEO_GRB + NEO_K
 
 ESP8266WebServer server(80);
 
-void serve(ESP8266WebServer& server, const char* const path)
-{
-  File file = LittleFS.open(path, "r");
-  if (!file)
-  {
-    server.send(404, "text/html", path);
-    return;
-  }
 
-  char buf[file.size() + 1];
-  file.readBytes(buf, file.size());
-  buf[file.size()] = 0;
-  file.close();
-
-  server.send(200, mime::getContentType(path), buf);
-}
-
-class UploadRequestHandler : public RequestHandler
-{
-  bool canHandle(HTTPMethod method, const String& uri) override
-  {
-    return method == HTTP_POST && uri == "/do-upload.html";
-  }
-  bool canUpload(const String& uri) override
-  {
-    return uri == "/do-upload.html";
-  }
-
-  void upload(ESP8266WebServer& server, const String& uri, HTTPUpload& upload) override
-  {
-    if (!canUpload(uri))
-      return;
-
-    static File file;
-
-    switch (upload.status)
-    {
-      case UPLOAD_FILE_START:
-        if (file)
-          file.close();
-
-        file = LittleFS.open(upload.filename.c_str(), "w");
-      break;
-      case UPLOAD_FILE_WRITE:
-        if (file)
-          file.write(upload.buf, upload.currentSize);
-      break;
-      case UPLOAD_FILE_END:
-        if (file)
-        {
-          file.close();
-          serve(server, "/success.html");
-        }
-      break;
-      default:
-        if (file)
-          file.close();
-        server.send(500, "text/plain", "Upload failed.");
-      break;
-    }
-  }
-};
+APIRequestHandler apihandler;
+FileRequestHandler filehandler;
 UploadRequestHandler uploadhandler;
 
+bool on = true;
 
-class FileRequestHandler : public RequestHandler
+enum class LightMode
 {
-  bool canHandle(HTTPMethod method, const String& uri) override
-  {
-    return method == HTTP_GET;
-  }
+  STATIC,
 
-  bool handle(ESP8266WebServer& server, HTTPMethod method, const String& uri) override
-  {
-    if (!canHandle(method, uri))
-      return false;
-
-    const char* path = uri == "/" ? "/index.html" : uri.c_str();
-    serve(server, path);
-    return true;
-  }
+  FLAME,
+  TWINKLE,
+  UP_WAVE,
 };
-FileRequestHandler filehandler;
-
-
-class APIRequestHandler : public RequestHandler
+LightMode lm_from_string(const String& str)
 {
-  bool canHandle(HTTPMethod method, const String& uri) override
-  {
-    return uri.startsWith("/api");
-  }
+  if (str == "static")
+    return LightMode::STATIC;
+  if (str == "flame")
+    return LightMode::FLAME;
+  if (str == "twinkle")
+    return LightMode::TWINKLE;
+  if (str == "up-wave")
+    return LightMode::UP_WAVE;
 
-  bool handle(ESP8266WebServer& server, HTTPMethod method, const String& uri) override
-  {
-    server.send(200, "text/html", "OK");
-    return true;
-  }
+  return LightMode::STATIC;
+}
+LightMode lightMode;
+
+
+enum class ColourMode
+{
+  STATIC,
+
+  RAINBOW,
+  NOISE_HUE
 };
-APIRequestHandler apihandler;
+ColourMode cm_from_string(const String& str)
+{
+  if (str == "static")
+    return ColourMode::STATIC;
+  if (str == "rainbow")
+    return ColourMode::RAINBOW;
+  if (str == "noise-hue")
+    return ColourMode::NOISE_HUE;
 
+  return ColourMode::STATIC;
+}
+ColourMode colourMode;
+uint32_t staticColour;
 
 void setup()
 {
+  lightMode = LightMode::STATIC;
+  colourMode = ColourMode::STATIC;
+  staticColour = 0xffffff;
+
   // start LEDs
   pixels.begin();
 
@@ -156,7 +112,7 @@ void setup()
   });
 
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    const size_t led_progress = (progress / static_cast<double>(total)) * 28;
+    const int8_t led_progress = (progress / static_cast<double>(total)) * 28;
     for (size_t i = 0; i < NUM_LEDS; ++i)
       pixels.setPixelColor(i, (27 - led_height(i)) < led_progress ? 0x00FF00 : 0x000000);
     pixels.show();
@@ -200,9 +156,80 @@ void setup()
   ArduinoOTA.begin();
 
   // setup webserver
-  server.addHandler(&uploadhandler);
+  apihandler.addRoute("off", [](ESP8266WebServer& server) {
+    on = false;
+    pixels.fill(0x000000);
+    pixels.show();
+    server.send(200);
+  });
+  apihandler.addRoute("on", [](ESP8266WebServer& server) {
+    on = true;
+    server.send(200);
+  });
+  apihandler.addRoute("set-mode", [](ESP8266WebServer& server) {
+    lightMode = lm_from_string(server.arg("mode"));
+    server.send(200);
+  });
+  apihandler.addRoute("set-colour-mode", [](ESP8266WebServer& server) {
+    colourMode = cm_from_string(server.arg("mode"));
+    server.send(200);
+  });
+  apihandler.addRoute("set-static-colour", [](ESP8266WebServer& server) {
+    staticColour = server.arg("colour").toInt();
+    server.send(200);
+  });
+  server.addHandler(&apihandler);
   server.addHandler(&filehandler);
+  server.addHandler(&uploadhandler);
   server.begin();
+}
+
+
+uint32_t getColour()
+{
+  switch (colourMode)
+  {
+    case ColourMode::STATIC:
+      return staticColour;
+    case ColourMode::NOISE_HUE:
+      return pixels.ColorHSV(inoise8(millis() / 20) << 8, 0xFF, 0xFF);
+    case ColourMode::RAINBOW:
+      return pixels.ColorHSV(millis() << 8, 0xFF, 0xFF);
+  }
+  return 0xffffff;
+}
+
+
+void flame()
+{
+  const uint8_t height = (inoise8(millis() / 5) / 255.0) * 28;
+  // const int8_t tilt = 0;
+  // const uint8_t angle = 0;
+  const uint8_t TIP_LENGTH = 3;
+
+  for (uint8_t i = 0; i < NUM_LEDS; ++i)
+  {
+    const uint8_t this_height = led_height(i);
+    if (this_height <= height - TIP_LENGTH)
+      pixels.setPixelColor(i, 0xFF0000);
+    else if (this_height <= height)
+      pixels.setPixelColor(i, 0xFF, (0x7F / TIP_LENGTH) * (TIP_LENGTH - (height - this_height)), 0x00);
+    else
+      pixels.setPixelColor(i, 0x000000);
+  }
+}
+
+
+void twinkle()
+{
+  for (uint8_t i = 0; i < NUM_LEDS; ++i)
+  {
+    const CRGB colour = (CRGB(pixels.getPixelColor(i))).nscale8(255 - 4);
+    pixels.setPixelColor(i, colour.r, colour.g, colour.b);
+  }
+
+  if (random(2) == 0)
+    pixels.setPixelColor(random(NUM_LEDS), getColour());
 }
 
 
@@ -224,26 +251,6 @@ void upwave()
   }
 }
 
-void flame()
-{
-  const uint8_t height = (inoise8(millis() / 5) / 255.0) * 28;
-  const int8_t tilt = 0;
-  const uint8_t angle = 0;
-  const uint8_t TIP_LENGTH = 3;
-
-  for (uint8_t i = 0; i < NUM_LEDS; ++i)
-  {
-    const uint8_t this_height = led_height(i);
-    if (this_height <= height - TIP_LENGTH)
-      pixels.setPixelColor(i, 0xFF0000);
-    else if (this_height <= height)
-      pixels.setPixelColor(i, 0xFF, (0x7F / TIP_LENGTH) * (TIP_LENGTH - (height - this_height)), 0x00);
-    else
-      pixels.setPixelColor(i, 0x000000);
-  }
-}
-
-
 
 void loop()
 {
@@ -257,8 +264,24 @@ void loop()
   // handle webserver stuff
   server.handleClient();
 
-  upwave();
-  // upstep();
+  if (!on)
+    return;
+
+  switch (lightMode)
+  {
+    case LightMode::STATIC:
+      pixels.fill(getColour());
+    break;
+    case LightMode::FLAME:
+      flame();
+    break;
+    case LightMode::TWINKLE:
+      twinkle();
+    break;
+    case LightMode::UP_WAVE:
+      upwave();
+    break;
+  }
 
   pixels.show();
 }

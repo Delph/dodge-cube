@@ -1,0 +1,55 @@
+body
+{
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  font-family: sans-serif;
+}
+
+header, footer
+{
+  width: 100%;
+  background-color: var(--bg-accent);
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+main
+{
+  height: 100%;
+}
+
+div.control-grid
+{
+  display: flex;
+  flex-wrap: wrap;
+}
+
+input[type=button]
+{
+  margin: 0.5cm;
+  width: calc(100% / 5 - 1cm);
+  height: 6em;
+  background: #111111;
+  border: none;
+  color: var(--fg-colour);
+  cursor: pointer;
+  user-select: none;
+}
+input[type=button].active {
+  background: var(--bg-accent);
+}
+
+a
+{
+  color: #00bfff;
+}
+
+
+#power {
+  position: absolute;
+  right: 8px;
+}

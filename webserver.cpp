@@ -1,22 +1,65 @@
 #include "webserver.h"
 
+
 #include <LittleFS.h>
 
-void serve(ESP8266WebServer& server, const char* const path)
+
+String listing(String path)
 {
-  File file = LittleFS.open(path, "r");
+  String html = "<html><head><title>Directory Listing</title></head><body>";
+  html += "<h1>Directory Listing for " + path + "</h1><ul>";
+  Dir dir = LittleFS.openDir(path);
+  while (dir.next())
+  {
+    String name = dir.fileName();
+    String display = dir.isDirectory() ? name + "/" : name;
+    String href = path + (path.endsWith("/") ? "" : "/") + name;
+    html += "<li><a href=\"" + href + "\">" + display + "</a></ul>";
+  }
+  html += "</ul></body></html>";
+  return html;
+}
+
+
+void serve(ESP8266WebServer& server, String path)
+{
+  File file = LittleFS.open(path == "/" ? "/index.html" : path, "r");
   if (!file)
   {
-    server.send(404, "text/html", path);
+    if (path == "/upload.html")
+    {
+      server.send(200, "text/html", R"(<!DOCTYPE html>
+<html>
+  <head>
+    <title>Dodge Cube</title>
+
+    <link rel="stylesheet" type="text/css" href="/style.css">
+  </head>
+  <body>
+    <form method="POST" action="/do-upload.html" enctype="multipart/form-data">
+      <input type="file" name="data"/>
+      <input type="submit" value="Upload"/>
+    </form>
+  </body>
+</html>)");
+      return;
+    }
+    server.send(404, "text/html", listing(path));
     return;
   }
 
-  char buf[file.size() + 1];
-  file.readBytes(buf, file.size());
-  buf[file.size()] = 0;
+  server.setContentLength(file.size());
+  server.send(200, mime::getContentType(file.name()), "");
+  uint8_t buffer[512];
+  size_t read;
+  while ((read = file.read(buffer, sizeof(buffer))) > 0)
+    server.client().write(buffer, read);
   file.close();
+  // char buf[file.size() + 1];
+  // file.readBytes(buf, file.size());
+  // buf[file.size()] = 0;
+  // file.close();
 
-  server.send(200, mime::getContentType(path), buf);
 }
 
 
@@ -63,8 +106,7 @@ bool FileRequestHandler::handle(ESP8266WebServer& server, HTTPMethod method, con
   if (!canHandle(method, uri))
     return false;
 
-  const char* path = uri == "/" ? "/index.html" : uri.c_str();
-  serve(server, path);
+  serve(server, uri);
   return true;
 }
 

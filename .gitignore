@@ -1,0 +1,10 @@
+# C++ build stuff
+compile_commands.json
+build/
+
+# web stuff
+web/node_modules
+web/bun.lockb
+web/build/
+
+

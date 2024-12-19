@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Dodge Cube</title>
+
+    <link rel="stylesheet" type="text/css" href="/reset.css">
+    <link rel="stylesheet" type="text/css" href="/theme.css">
+    <link rel="stylesheet" type="text/css" href="/style.css">
+
+    <script src="/main.js"></script>
+
+    <script type="module">
+      import { Component } from "/src/vwc/Component.ts";
+      import { watchEffect, ref, computed } from "/src/vwc/Reactive.ts";
+      import { HSV } from "/src/hsv.ts";
+
+      class ColourWheel extends Component {
+        constructor() {
+          super();
+
+          for (let button of this.shadowRoot.querySelectorAll('.colour-button'))
+            button.addEventListener('click', event => this.click(event));
+        }
+
+
+        click(event) {
+          const name = [...event.target.classList].find(cls => cls.startsWith('colour-button-')).substr('colour-button-'.length);
+
+          const value = this.getAttribute('value');
+          const ivalue = parseInt(value.substr(1), 16);
+          const hsv = HSV.rgb(ivalue >> 16, (ivalue >> 8) & 0xFF, ivalue & 0xFF);
+
+          const STEP_SIZE = 30;
+
+          switch (name) {
+            case 'white':
+              this.emit('#ffffff');
+              break;
+            case 'red':
+              if (value === '#ffffff' || hsv.h > 120 && hsv.h < 240) {
+                this.emit('#ff0000');
+              }
+              else {
+                if (hsv.h > 0 && hsv.h <= 120)
+                  hsv.h -= STEP_SIZE;
+                else if (hsv.h >= 240)
+                  hsv.h += STEP_SIZE;
+                this.emit(`#${hsv.to_rgb().map(c => c.toString(16).padStart(2, '0')).join('')}`);
+              }
+              break;
+            case 'green':
+              if (value === '#ffffff' || hsv.h > 240 && hsv.v < 360) {
+                this.emit('#00ff00');
+              }
+              else {
+                if (hsv.h > 120)
+                  hsv.h -= STEP_SIZE;
+                else if (hsv.h < 120)
+                  hsv.h += STEP_SIZE;
+                this.emit(`#${hsv.to_rgb().map(c => c.toString(16).padStart(2, '0')).join('')}`);
+              }
+              break;
+            case 'blue':
+              if (value === '#ffffff' || hsv.h > 0 && hsv.h < 120) {
+                this.emit('#0000ff');
+              }
+              else {
+                if (hsv.h === 0 || hsv.h > 240)
+                  hsv.h -= STEP_SIZE;
+                else if (hsv.h < 240)
+                  hsv.h += STEP_SIZE;
+                this.emit(`#${hsv.to_rgb().map(c => c.toString(16).padStart(2, '0')).join('')}`);
+              }
+              break;
+          }
+        }
+
+
+        emit(colour) {
+          const component = this.shadowRoot.host;
+          this.shadowRoot.querySelector('.colour-wheel-selection').style.background=colour;
+          component.setAttribute('value', colour);
+          component.dispatchEvent(new CustomEvent('colour', {
+            target: component,
+            detail: colour
+          }));
+        }
+      }
+
+      class SlideToggle extends Component {
+        constructor() {
+          super();
+
+          this.shadowRoot.querySelector('input').addEventListener('change', event => {
+            this.dispatchEvent(new CustomEvent('change', {
+              detail: { checked: event.target.checked },
+              bubbles: true,
+              composed: true
+            }));
+          });
+        }
+
+        get checked() {
+          return this.shadowRoot.querySelector('input').checked;
+        }
+
+        set checked(value) {
+          const input = this.shadowRoot.querySelector('input');
+
+          if (value)
+            input.setAttribute('checked', '');
+          else
+            input.removeAttribute('checked');
+        }
+      }
+
+      class ModalContainer extends Component {
+        constructor() {
+          super();
+
+          this.shadowRoot.querySelector('.background').addEventListener('click', () => this.shadowRoot.host.remove());
+        }
+      }
+
+      Component.register(ColourWheel, SlideToggle, ModalContainer);
+    </script>
+  </head>
+  <body>
+    <header>
+      <h1>Dodge Cube</h1>
+      <slide-toggle on="&#x23fd;" off="&#x2b58;" id="power"></slide-toggle>
+    </header>
+
+    <main>
+      <!-- modes -->
+      <div class="control-grid">
+        <input type="button" data-method="set-mode" data-mode="static" value="Static">
+        <input type="button" data-method="set-mode" data-mode="chaser" value="Chaser">
+        <input type="button" data-method="set-mode" data-mode="twinkle" value="Twinkle">
+      </div>
+
+      <!-- colour modes -->
+      <div class="control-grid">
+        <input type="button" data-method="set-colour-mode" data-mode="static" value="Static">
+        <input type="button" data-method="set-colour-mode" data-mode="noise-hue" value="Noisy Hue">
+        <input type="button" data-method="set-colour-mode" data-mode="rainbow" value="Rainbow">
+      </div>
+
+      <div style="display: flex; justify-content: center;">
+        <colour-wheel value="#ffffff"></colour-wheel>
+      </div>
+    </main>
+
+    <template id="template-colour-wheel">
+      <div class="colour-wheel">
+        <div class="colour-wheel-selection"></div>
+        <div class="colour-button colour-button-red"></div>
+        <div class="colour-button colour-button-green"></div>
+        <div class="colour-button colour-button-blue"></div>
+        <div class="colour-button colour-button-white"></div>
+        <input type="hidden" value="$value">
+      </div>
+      <style>
+        .colour-wheel {
+          width: 240px;
+          height: 240px;
+          border-radius: 50%;
+          background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
+          box-sizing: border-box;
+          position: relative;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+        }
+        .colour-wheel::before {
+          content: '';
+          width: 180px;
+          height: 180px;
+          border-radius: 50%;
+          background: var(--bg-colour);
+          position: absolute;
+        }
+
+        .colour-wheel-selection {
+          width: 180px;
+          height: 180px;
+          border-radius: 50%;
+          background: attr(data-colour);
+          box-sizing: border-box;
+          position: relative;
+          display: flex;
+          border: 1px solid black;
+          justify-content: center;
+          align-items: center;
+        }
+
+        .colour-button {
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          box-sizing: border-box;
+          border: 1px solid black;
+          cursor: pointer;
+          user-select: none;
+        }
+
+        .colour-button-red {
+          background: #ff0000;
+          position: absolute;
+          top: 15px;
+          left: 50%;
+          transform: translate(-50%, -50%);
+        }
+        .colour-button-green {
+          background: #00ff00;
+          position: absolute;
+          top: 76%;
+          left: 85%;
+          transform: translate(-50%, -50%);
+        }
+        .colour-button-blue {
+          background: #0000ff;
+          position: absolute;
+          top: 76%;
+          left: 15%;
+          transform: translate(-50%, -50%);
+        }
+
+        .colour-button-white {
+          background: #ffffff;
+          position: absolute;
+        }
+      </style>
+    </template>
+    <template id="template-slide-toggle">
+      <input type="checkbox" data-off="$off" data-on="$on" checked="$checked">
+      <style>
+        input {
+          width: 50px;
+          height: 24px;
+          position: relative;
+          cursor: pointer;
+          user-select: none;
+        }
+        input::before {
+          content: '';
+          position: absolute;
+          width: 50px;
+          height: 24px;
+          background: #aaa;
+          border-radius: 12px;
+        }
+        input::after {
+          content: attr(data-off);
+          position: absolute;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          width: 20px;
+          height: 20px;
+          border-radius: 10px;
+          background: #777;
+          left: 2px;
+          top: 2px;
+          transition: 200ms ease-in-out all;
+        }
+        input:checked::after {
+          content: attr(data-on);
+          background:green;
+          left: 28px;
+        }
+      </style>
+    </template>
+    <template id="template-modal-container">
+      <div class="background">
+        <div class="container">
+          <slot></slot>
+        </div>
+      </div>
+      <style>
+        .background {
+          position: fixed;
+          top: 0;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          background: rgba(0, 0, 0, 0.75);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+        }
+
+        .container {
+          background: var(--bg-colour);
+          min-width: 240px;
+          min-height: 380px;
+          border-radius: 4px;
+        }
+      </style>
+    </template>
+  </body>
+</html>

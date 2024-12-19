@@ -2,75 +2,62 @@
 #include <ArduinoOTA.h>
 #include <LittleFS.h>
 
-#include <FastLED.h> // for math
-#include <Adafruit_NeoPixel.h> // for leds
+#include <ArduinoJson.h>
+#include <FastLED.h>
 
 #include "config.h"
+#include "enum.h"
 #include "mapping.h"
 #include "pins.h"
 #include "webserver.h"
 
-const char* SSID = "";
-const char* PASSWORD = "";
+const char* SSID = "VM5105076";
+const char* PASSWORD = "c4wvPhdwmsmp";
 const IPAddress ip(192,168,0,10);
 const IPAddress gateway(192,168,0,1);
 const IPAddress subnet(255,255,255,0);
 
 bool updateInProgress = false;
 
-Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUM_LEDS, PIN_LEDS, NEO_GRB + NEO_KHZ800);
+CRGB leds[NUM_LEDS];
+
 
 ESP8266WebServer server(80);
 
 
 APIRequestHandler apihandler;
 FileRequestHandler filehandler;
-UploadRequestHandler uploadhandler;
+UploadRequestHandler uploadHandler;
 
 bool on = true;
 
 enum class LightMode
 {
   STATIC,
-
-  FLAME,
   TWINKLE,
-  UP_WAVE,
+  CHASER,
 };
-LightMode lm_from_string(const String& str)
-{
-  if (str == "static")
-    return LightMode::STATIC;
-  if (str == "flame")
-    return LightMode::FLAME;
-  if (str == "twinkle")
-    return LightMode::TWINKLE;
-  if (str == "up-wave")
-    return LightMode::UP_WAVE;
+ENUM_SERIALISATION(LightMode, {
+  {LightMode::STATIC, "static"},
+  {LightMode::TWINKLE, "twinkle"},
+  {LightMode::CHASER, "chaser"}
+});
 
-  return LightMode::STATIC;
-}
 LightMode lightMode;
 
 
 enum class ColourMode
 {
   STATIC,
-
   RAINBOW,
   NOISE_HUE
 };
-ColourMode cm_from_string(const String& str)
-{
-  if (str == "static")
-    return ColourMode::STATIC;
-  if (str == "rainbow")
-    return ColourMode::RAINBOW;
-  if (str == "noise-hue")
-    return ColourMode::NOISE_HUE;
+ENUM_SERIALISATION(ColourMode, {
+  {ColourMode::STATIC, "static"},
+  {ColourMode::RAINBOW, "rainbow"},
+  {ColourMode::NOISE_HUE, "noise-hue"}
+});
 
-  return ColourMode::STATIC;
-}
 ColourMode colourMode;
 uint32_t staticColour;
 
@@ -80,20 +67,21 @@ void setup()
   colourMode = ColourMode::STATIC;
   staticColour = 0xffffff;
 
-  // start LEDs
-  pixels.begin();
+  FastLED.addLeds<WS2811, PIN_LEDS, GRB>(leds, NUM_LEDS).setCorrection(LED_CORRECTION);
+  FastLED.setBrightness(15);
+  FastLED.show();
 
-  pixels.setPixelColor(0, 0x00FF00);
-  pixels.setPixelColor(27, 0x00FF00);
-  pixels.setPixelColor(28, 0x00FF00);
-  pixels.show();
+  leds[0] = 0x00FF00;
+  leds[27] = 0x00FF00;
+  leds[28] = 0x00FF00;
+  FastLED.show();
 
   if (!LittleFS.begin())
   {
-    pixels.setPixelColor(0, 0xFF0000);
-    pixels.setPixelColor(27, 0xFF0000);
-    pixels.setPixelColor(28, 0xFF0000);
-    pixels.show();
+    leds[0] = 0xFF0000;
+    leds[27] = 0xFF0000;
+    leds[28] = 0xFF0000;
+    FastLED.show();
 
     while (true);
   }
@@ -106,60 +94,72 @@ void setup()
   });
 
   ArduinoOTA.onEnd([]() {
-    pixels.fill(0xffffff);
-    pixels.show();
+    if (ArduinoOTA.getCommand() == U_FS)
+      LittleFS.begin();
+    fill_solid(leds, NUM_LEDS, 0xffffff);
+    FastLED.show();
     updateInProgress = false;
   });
 
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     const int8_t led_progress = (progress / static_cast<double>(total)) * 28;
     for (size_t i = 0; i < NUM_LEDS; ++i)
-      pixels.setPixelColor(i, (27 - led_height(i)) < led_progress ? 0x00FF00 : 0x000000);
-    pixels.show();
+      leds[i] = (27 - led_height(i)) < led_progress ? 0x00FF00 : 0x000000;
+    FastLED.show();
   });
 
   ArduinoOTA.onError([](ota_error_t error) {
     if (error == OTA_AUTH_ERROR)
-      pixels.setPixelColor(0, 0xFF0000);
+      leds[0] = 0xFF0000;
     else if (error == OTA_BEGIN_ERROR)
-      pixels.setPixelColor(1, 0xFF0000);
+      leds[1] = 0xFF0000;
     else if (error == OTA_CONNECT_ERROR)
-      pixels.setPixelColor(2, 0xFF0000);
+      leds[2] = 0xFF0000;
     else if (error == OTA_RECEIVE_ERROR)
-      pixels.setPixelColor(3, 0xFF0000);
+      leds[3] = 0xFF0000;
     else if (error == OTA_END_ERROR)
-      pixels.setPixelColor(4, 0xFF0000);
+      leds[4] = 0xFF0000;
+    FastLED.show();
   });
 
   // setup WiFi
   WiFi.begin(SSID, PASSWORD);
   WiFi.mode(WIFI_STA);
   WiFi.config(ip, gateway, subnet);
-  pixels.setPixelColor(1, 0x0000FF);
-  pixels.setPixelColor(26, 0x0000FF);
-  pixels.setPixelColor(29, 0x0000FF);
-  pixels.show();
+  leds[1] = 0x0000FF;
+  leds[26] = 0x0000FF;
+  leds[29] = 0x0000FF;
+  FastLED.show();
 
   while (WiFi.waitForConnectResult() != WL_CONNECTED)
   {
     delay(5000);
     ESP.restart();
   }
-  pixels.setPixelColor(1, 0x00FF00);
-  pixels.setPixelColor(26, 0x00FF00);
-  pixels.setPixelColor(29, 0x00FF00);
-  pixels.show();
+  leds[1] = 0x00FF00;
+  leds[26] = 0x00FF00;
+  leds[29] = 0x00FF00;
+  FastLED.show();
 
   // setup OTA
-  ArduinoOTA.setPort(2000);
   ArduinoOTA.setHostname("dodge-cube");
   ArduinoOTA.begin();
 
   // setup webserver
+  apihandler.addRoute("status", [](ESP8266WebServer& server) {
+    JsonDocument document;
+    document["on"] = on;
+    document["mode"] = serialise_enum(lightMode);
+    document["colour"] = serialise_enum(colourMode);
+
+    server.setContentLength(measureJson(document));
+    server.send(200, "application/json", "");
+    serializeJson(document, server.client());
+  });
   apihandler.addRoute("off", [](ESP8266WebServer& server) {
     on = false;
-    pixels.fill(0x000000);
-    pixels.show();
+    fill_solid(leds, NUM_LEDS, 0x000000);
+    FastLED.show();
     server.send(200);
   });
   apihandler.addRoute("on", [](ESP8266WebServer& server) {
@@ -167,34 +167,36 @@ void setup()
     server.send(200);
   });
   apihandler.addRoute("set-mode", [](ESP8266WebServer& server) {
-    lightMode = lm_from_string(server.arg("mode"));
+    lightMode = deserialise_enum<LightMode>(server.arg("mode").c_str());
     server.send(200);
   });
   apihandler.addRoute("set-colour-mode", [](ESP8266WebServer& server) {
-    colourMode = cm_from_string(server.arg("mode"));
+    colourMode = deserialise_enum<ColourMode>(server.arg("mode").c_str());
     server.send(200);
   });
   apihandler.addRoute("set-static-colour", [](ESP8266WebServer& server) {
+    colourMode = ColourMode::STATIC;
     staticColour = server.arg("colour").toInt();
     server.send(200);
   });
+  server.enableCORS(true);
   server.addHandler(&apihandler);
   server.addHandler(&filehandler);
-  server.addHandler(&uploadhandler);
+  server.addHandler(&uploadHandler);
   server.begin();
 }
 
 
-uint32_t getColour()
+CRGB getColour()
 {
   switch (colourMode)
   {
     case ColourMode::STATIC:
       return staticColour;
     case ColourMode::NOISE_HUE:
-      return pixels.ColorHSV(inoise8(millis() / 20) << 8, 0xFF, 0xFF);
+      return CHSV(inoise8(millis() / 20), 0xFF, 0xFF);
     case ColourMode::RAINBOW:
-      return pixels.ColorHSV(millis() << 8, 0xFF, 0xFF);
+      return CHSV(millis() / 32, 0xFF, 0xFF);
   }
   return 0xffffff;
 }
@@ -211,11 +213,11 @@ void flame()
   {
     const uint8_t this_height = led_height(i);
     if (this_height <= height - TIP_LENGTH)
-      pixels.setPixelColor(i, 0xFF0000);
+      leds[i] = 0xFF0000;
     else if (this_height <= height)
-      pixels.setPixelColor(i, 0xFF, (0x7F / TIP_LENGTH) * (TIP_LENGTH - (height - this_height)), 0x00);
+      leds[i] = CHSV(0xFF, (0x7F / TIP_LENGTH) * (TIP_LENGTH - (height - this_height)), 0x00);
     else
-      pixels.setPixelColor(i, 0x000000);
+      leds[i] = 0x000000;
   }
 }
 
@@ -223,13 +225,117 @@ void flame()
 void twinkle()
 {
   for (uint8_t i = 0; i < NUM_LEDS; ++i)
-  {
-    const CRGB colour = (CRGB(pixels.getPixelColor(i))).nscale8(255 - 4);
-    pixels.setPixelColor(i, colour.r, colour.g, colour.b);
-  }
+    leds[i] = leds[i].nscale8(255 - 4);
 
   if (random(2) == 0)
-    pixels.setPixelColor(random(NUM_LEDS), getColour());
+    leds[random(NUM_LEDS)] = getColour();
+}
+
+
+// an even edge always points towards a 4-edge vertex
+// an odd edge always points away from a 4-edge vertex
+// ditto/vice-versa for 3-edge verties (even points away, odd points towards)
+uint8_t graph[][24][3] = {
+  {
+    {4, 3, 0},    //  0
+    {12, 13, 0},  //  1
+    {17, 1, 0},   //  2
+    {20, 21, 2},  //  3
+    {3, 0, 0},    //  4
+    {4, 11, 10},  //  5
+    {10, 9, 0},   //  6
+    {18, 19, 9},  //  7
+    {23, 7, 0},   //  8
+    {14, 15, 8},  //  9
+    {9, 6, 0},    // 10
+    {10, 5, 4},   // 11
+    {16, 15, 0},  // 12
+    {0, 1, 12},   // 13
+    {11, 13, 0},  // 14
+    {8, 9, 14},   // 15
+    {15, 12, 0},  // 16
+    {22, 23, 16}, // 17
+    {22, 21, 0},  // 18
+    {6, 7, 18},   // 19
+    {5, 19, 0},   // 20
+    {2, 3, 20},   // 21
+    {21, 18, 0},  // 22
+    {16, 17, 22}  // 23
+  },
+  {
+    {1, 12, 13},  //  0
+    {2, 17, 0},   //  1
+    {3, 20, 21},  //  2
+    {0, 4, 0},    //  3
+    {11, 10, 9},  //  4
+    {19, 20, 0},  //  5
+    {7, 18, 19},  //  6
+    {8, 23, 0},   //  7
+    {9, 14, 15},  //  8
+    {6, 10, 0},   //  9
+    {5, 4, 11},   // 10
+    {13, 14, 0},  // 11
+    {13, 0, 1},   // 12
+    {14, 11, 0},  // 13
+    {15, 8, 9},   // 14
+    {12, 16, 0},  // 15
+    {17, 22, 23}, // 16
+    {1, 2, 0},    // 17
+    {19, 6, 7},   // 18
+    {20, 5, 0},   // 19
+    {21, 2, 3},   // 20
+    {18, 22, 0},  // 21
+    {23, 16, 17}, // 22
+    {7, 8, 0}     // 23
+  }
+};
+
+void chaser()
+{
+  const uint32_t speed = 50;
+  constexpr uint8_t decay = 255 - 2;
+
+  struct Particle
+  {
+    CRGB colour;
+    uint32_t speed;
+    uint32_t last;
+    uint8_t decay;
+    uint8_t position;
+    bool forwards;
+  };
+  static Particle particles[] = {
+    {CRGB(0xFF0000), 50+10, 0, 255 - 2, 0, true},
+    {CRGB(0x00FF00), 50+20, 0, 255 - 2, 0, true},
+    {CRGB(0x0000FF), 50+30, 0, 255 - 2, 0, true},
+    {CRGB(0xFF0000), 50+60, 0, 255 - 2, 0, true},
+    {CRGB(0x00FF00), 50+50, 0, 255 - 2, 0, true},
+    {CRGB(0x0000FF), 50+40, 0, 255 - 2, 0, true}
+  };
+
+  const uint32_t now = millis();
+
+  for (uint8_t i = 0; i < NUM_LEDS; ++i)
+    leds[i] = leds[i].nscale8(decay);
+
+  for (auto& particle : particles)
+  {
+    if (now - particle.last <= particle.speed)
+      continue;
+    particle.last = now;
+
+    const uint8_t segment = particle.position / 7;
+    uint8_t next = particle.position + (particle.forwards * 2 - 1);
+
+    if (segment != next / 7)
+    {
+      next = graph[particle.forwards][segment][random(((segment + particle.forwards) & 1) + 2)];
+      particle.forwards = particle.forwards != ((segment & 1) == (next & 1));
+      next = next * 7 + (6 * !particle.forwards);
+    }
+    particle.position = next;
+    leds[particle.position] |= particle.colour;
+  }
 }
 
 
@@ -241,13 +347,13 @@ void upwave()
   for (uint8_t i = 0; i < NUM_LEDS; ++i)
   {
     const uint8_t this_height = led_height(i);
-    const uint16_t hue = inoise8(millis() / 20, this_height * 16) << 8;
+    const uint16_t hue = inoise8(millis() / 20, this_height * 16);
     if (this_height <= height - TIP_LENGTH)
-      pixels.setPixelColor(i, pixels.ColorHSV(hue, 0xFF, 0xFF));
+      leds[i] = CHSV(hue, 0xFF, 0xFF);
     else if (this_height <= height)
-      pixels.setPixelColor(i, pixels.ColorHSV(hue, (0xFF / TIP_LENGTH) * ((height - this_height)), 0xFF));
+      leds[i] = CHSV(hue, (0xFF / TIP_LENGTH) * ((height - this_height)), 0xFF);
     else
-      pixels.setPixelColor(i, 0x000000);
+      leds[i] = 0x000000;
   }
 }
 
@@ -270,18 +376,15 @@ void loop()
   switch (lightMode)
   {
     case LightMode::STATIC:
-      pixels.fill(getColour());
-    break;
-    case LightMode::FLAME:
-      flame();
+      fill_solid(leds, NUM_LEDS, getColour());
     break;
     case LightMode::TWINKLE:
       twinkle();
     break;
-    case LightMode::UP_WAVE:
-      upwave();
+    case LightMode::CHASER:
+      chaser();
     break;
   }
 
-  pixels.show();
+  FastLED.show();
 }
